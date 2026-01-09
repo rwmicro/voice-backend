@@ -1,0 +1,229 @@
+# ============================================================================
+# Docker Ignore File - Optimized for ML Projects (2025 Best Practices)
+# Prevents unnecessary files from being included in Docker build context
+# Reduces build time and image size
+# ============================================================================
+
+# ==============================================================================
+# Python
+# ==============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ==============================================================================
+# Virtual Environments
+# ==============================================================================
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+.virtualenv/
+
+# ==============================================================================
+# IDE & Editors
+# ==============================================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+.project
+.pydevproject
+.settings/
+
+# ==============================================================================
+# Testing (exclude test artifacts but keep tests for dev image)
+# ==============================================================================
+.pytest_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+.nox/
+.hypothesis/
+*.cover
+pytest.ini
+.test
+
+# ==============================================================================
+# Git
+# ==============================================================================
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# ==============================================================================
+# Documentation (Exclude build artifacts, keep docs)
+# ==============================================================================
+docs/_build/
+*.rst
+.readthedocs.yml
+
+# ==============================================================================
+# CI/CD
+# ==============================================================================
+.travis.yml
+.gitlab-ci.yml
+.circleci/
+.github/workflows/
+Jenkinsfile
+
+# ==============================================================================
+# Docker (Don't include Docker files in build context except Dockerfile itself)
+# ==============================================================================
+Dockerfile*
+!Dockerfile
+docker-compose*.yml
+# .dockerignore itself is auto-excluded
+
+# ==============================================================================
+# Machine Learning - Models & Data (CRITICAL!)
+# ==============================================================================
+# Model files - Download at runtime, don't bake into image
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.pb
+*.onnx
+*.tflite
+*.safetensors
+*.bin
+*.msgpack
+
+# Model directories
+models/
+checkpoints/
+weights/
+pretrained/
+saved_models/
+
+# Data directories  
+data/
+datasets/
+*.csv
+*.json
+*.jsonl
+*.parquet
+*.arrow
+
+# Training artifacts
+runs/
+logs/
+tensorboard/
+wandb/
+mlruns/
+
+# Cache directories
+.cache/
+*.cache/
+__pypackages__/
+
+# ==============================================================================
+# Application Specific
+# ==============================================================================
+# Logs (will be mounted as volumes)
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Environment files (SENSITIVE - never include in image!)
+.env
+.env.*
+!.env.example
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Audio files (can be large - except small reference files)
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+# EXCEPTION: Keep audio prompts (small reference files needed for TTS)
+!voice/audio_prompts/**/*.wav
+!voice/audio_prompts/**/*.mp3
+!voice/audio_prompts/**/*.flac
+
+# ==============================================================================
+# OS Files
+# ==============================================================================
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ==============================================================================
+# Jupyter Notebooks
+# ==============================================================================
+.ipynb_checkpoints/
+*.ipynb
+
+# ==============================================================================
+# Scripts (Don't include in image - use COPY selectively)
+# ==============================================================================
+*.sh
+!entrypoint.sh
+start*.sh
+deploy*.sh
+
+# ==============================================================================
+# Misc
+# ==============================================================================
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+cython_debug/
+
+# Deprecated folder (don't include old code)
+voice/api/deprecated/

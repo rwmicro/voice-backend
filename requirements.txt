@@ -1,0 +1,45 @@
+# ===========================
+# Voice Backend Dependencies
+# TTS/STT Service Requirements
+# ===========================
+
+# Core Framework
+fastapi>=0.115.2  # Required by gradio 5.44.1 (chatterbox dependency)
+uvicorn[standard]>=0.30.0
+websockets>=12.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-multipart>=0.0.18  # Required by gradio 5.44.1 (chatterbox dependency)
+gunicorn==21.2.0
+
+# Machine Learning & Deep Learning
+torch>=2.0.0
+transformers>=4.36.0
+accelerate>=0.25.0
+bitsandbytes>=0.41.0  # Required for 8-bit quantization
+
+# Audio Processing
+sounddevice>=0.4.6
+soundfile>=0.12.1
+librosa>=0.10.1
+scipy>=1.11.4
+numpy>=1.26.0,<2.0.0  # 1.26+ required for Python 3.12
+webrtcvad>=2.0.10
+
+# Language Detection
+langdetect>=1.0.9
+
+# TTS Providers
+kokoro>=0.9.4
+chatterbox-tts>=0.1.6
+# f5-tts>=1.1.15  # Installed separately in Dockerfile with --no-deps to avoid gradio conflict
+fugashi
+pyopenjtalk
+
+# Utilities
+python-dotenv>=1.0.0
+loguru>=0.7.0
+requests>=2.31.0
+
+# Development
+pytest>=7.4.0

@@ -1,0 +1,249 @@
+# ============================================================================
+# RAG Voice Backend - Docker Compose Configuration
+# Production-ready setup for GPU/CPU deployments (2025 best practices)
+# ============================================================================
+#
+# Usage:
+#   GPU (default):  docker-compose up voice-backend
+#   CPU only:       docker-compose --profile cpu up voice-backend-cpu
+#   Development:    docker-compose --profile dev up voice-backend-dev
+#
+# ============================================================================
+
+services:
+  # ==========================================================================
+  # GPU Service (Default - Requires NVIDIA Container Toolkit)
+  # ==========================================================================
+  voice-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DEVICE_TYPE: gpu
+        PYTHON_VERSION: "3.11"
+        CUDA_VERSION: "13.1.0"
+    image: ragcoon/voice-backend:gpu-latest
+    container_name: voice-backend-gpu
+    restart: unless-stopped
+
+    # GPU Support - NVIDIA Container Toolkit required
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1  # Use 1 GPU (change to specific number if needed)
+              capabilities: [gpu]
+        limits:
+          cpus: '8'
+          memory: 16G
+
+    # Resource limits (fallback if deploy not supported)
+    mem_limit: 16g
+    memswap_limit: 16g
+    shm_size: '2gb'  # Critical for PyTorch DataLoader
+
+    # Environment Configuration
+    env_file:
+      - .env
+    environment:
+      # Server Configuration
+      - HOST=0.0.0.0
+      - PORT=8002
+      - LOG_LEVEL=INFO
+
+      # Device Configuration
+      - TTS_DEVICE=cuda
+      - STT_DEVICE=cuda
+      - STT_USE_QUANTIZATION=true
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+
+      # Model Cache Paths
+      - TRANSFORMERS_CACHE=/app/models/transformers
+      - HF_HOME=/app/models/huggingface
+      - TORCH_HOME=/app/models/torch
+
+      # Python Configuration
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+
+    # Port Mapping
+    ports:
+      - "8002:8002"
+
+    # Volume Mounts
+    volumes:
+      # Application data
+      - ./data:/app/data:rw
+      - ./logs:/app/logs:rw
+
+      # Model cache (persistent)
+      - model-cache:/app/models:rw
+
+      # Audio prompts (read-only)
+      - ./voice/audio_prompts:/app/voice/audio_prompts:ro
+
+    # Network
+    networks:
+      - voice-network
+
+    # Health Check
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8002/api/voice/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    # Logging Configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ==========================================================================
+  # CPU Service (For systems without GPU)
+  # ==========================================================================
+  voice-backend-cpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DEVICE_TYPE: cpu
+        PYTHON_VERSION: "3.11"
+    image: ragcoon/voice-backend:cpu-latest
+    container_name: voice-backend-cpu
+    restart: unless-stopped
+    profiles:
+      - cpu
+
+    # Resource limits for CPU
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+
+    mem_limit: 8g
+    memswap_limit: 8g
+    shm_size: '1gb'
+
+    env_file:
+      - .env
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8002
+      - LOG_LEVEL=INFO
+      - TTS_DEVICE=cpu
+      - STT_DEVICE=cpu
+      - OMP_NUM_THREADS=4
+      - MKL_NUM_THREADS=4
+      - PYTHONUNBUFFERED=1
+
+    ports:
+      - "8002:8002"
+
+    volumes:
+      - ./data:/app/data:rw
+      - ./logs:/app/logs:rw
+      - model-cache:/app/models:rw
+      - ./voice/audio_prompts:/app/voice/audio_prompts:ro
+
+    networks:
+      - voice-network
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/api/voice/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ==========================================================================
+  # Development Service (Hot Reload)
+  # ==========================================================================
+  voice-backend-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DEVICE_TYPE: gpu
+        PYTHON_VERSION: "3.11"
+    image: ragcoon/voice-backend:dev-latest
+    container_name: voice-backend-dev
+    restart: "no"
+    profiles:
+      - dev
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    shm_size: '2gb'
+
+    env_file:
+      - .env
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8002
+      - LOG_LEVEL=DEBUG
+      - TTS_DEVICE=cuda
+      - STT_DEVICE=cuda
+      - PYTHONUNBUFFERED=1
+
+    ports:
+      - "8002:8002"
+
+    # Mount source code for hot reload
+    volumes:
+      - ./voice:/app/voice:rw
+      - ./config:/app/config:rw
+      - ./tests:/app/tests:rw
+      - ./data:/app/data:rw
+      - ./logs:/app/logs:rw
+      - model-cache:/app/models:rw
+
+    networks:
+      - voice-network
+
+    # Override command for development with auto-reload
+    command:
+      - sh
+      - -c
+      - |
+        echo 'Starting in DEVELOPMENT mode with hot reload...'
+        exec uvicorn voice.api.main:app \
+          --host 0.0.0.0 \
+          --port 8002 \
+          --reload \
+          --log-level debug \
+          --reload-dir /app/voice \
+          --reload-dir /app/config
+
+# ==========================================================================
+# Networks
+# ==========================================================================
+networks:
+  voice-network:
+    driver: bridge
+    name: voice-network
+
+# ==========================================================================
+# Volumes
+# ==========================================================================
+volumes:
+  model-cache:
+    name: voice-model-cache
+    driver: local
