@@ -10,7 +10,7 @@ websockets>=12.0
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
 python-multipart>=0.0.18  # Required by gradio 5.44.1 (chatterbox dependency)
-gunicorn==21.2.0
+gunicorn==22.0.0
 
 # Machine Learning & Deep Learning
 torch>=2.0.0
