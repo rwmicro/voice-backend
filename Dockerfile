@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # ==============================================================================
 # RAG Voice Backend - Production-Ready Multi-Stage Dockerfile
 # Supports both GPU (NVIDIA CUDA) and CPU deployments
@@ -8,12 +7,12 @@
 
 ARG DEVICE_TYPE=gpu
 ARG PYTHON_VERSION=3.11
-ARG CUDA_VERSION=13.1.0
+ARG CUDA_VERSION=12.8.1
 
 # ==============================================================================
 # GPU Builder Stage
 # ==============================================================================
-FROM nvidia/cuda:13.1.0-devel-ubuntu24.04 AS builder-gpu
+FROM nvidia/cuda:12.8.1-devel-ubuntu24.04 AS builder-gpu
 
 ENV DEBIAN_FRONTEND=noninteractive
 ARG PYTHON_VERSION
@@ -45,18 +44,17 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 WORKDIR /tmp
 COPY requirements.txt ./
 
-# Install PyTorch with CUDA 12.1+ support FIRST (largest dependency, cache separately)
-# Note: PyTorch cu121 wheels are compatible with CUDA 13.x
+# Install PyTorch with CUDA 12.8 support (required for Blackwell RTX 50xx)
 RUN pip install --no-cache-dir \
     torch \
     torchaudio \
-    --index-url https://download.pytorch.org/whl/cu121
+    --index-url https://download.pytorch.org/whl/cu128
 
 # Install big dependencies first to simplify pip resolver
 RUN pip install --no-cache-dir \
     numpy>=1.26.0,\<2.0.0 \
     scipy>=1.11.4 \
-    transformers>=4.36.0
+    transformers>=4.51.0
 
 # Install main application dependencies with legacy resolver (Python 3.12 compatibility)
 RUN pip install --no-cache-dir --use-deprecated=legacy-resolver -r requirements.txt
@@ -122,7 +120,7 @@ RUN pip install --no-cache-dir \
 RUN pip install --no-cache-dir \
     numpy>=1.26.0,\<2.0.0 \
     scipy>=1.11.4 \
-    transformers>=4.36.0
+    transformers>=4.51.0
 
 # Install main application dependencies with legacy resolver (Python 3.12 compatibility)
 RUN pip install --no-cache-dir --use-deprecated=legacy-resolver -r requirements.txt
@@ -151,7 +149,7 @@ RUN find /opt/venv -type d -name __pycache__ -print0 | xargs -0 rm -rf 2>/dev/nu
 # ==============================================================================
 # GPU Runtime Stage
 # ==============================================================================
-FROM nvidia/cuda:13.1.0-runtime-ubuntu24.04 AS runtime-gpu
+FROM nvidia/cuda:12.8.1-runtime-ubuntu24.04 AS runtime-gpu
 
 ENV DEBIAN_FRONTEND=noninteractive
 ARG PYTHON_VERSION

@@ -51,22 +51,26 @@ def setup_logger(
 
     # File handler (if specified)
     if log_file:
-        # Ensure log directory exists
-        log_path = Path(log_file)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            # Ensure log directory exists
+            log_path = Path(log_file)
+            log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        logger.add(
-            log_file,
-            format=format_string,
-            level=level,
-            rotation=rotation,
-            retention=retention,
-            compression="zip",
-            backtrace=True,
-            diagnose=True,
-        )
+            logger.add(
+                log_file,
+                format=format_string,
+                level=level,
+                rotation=rotation,
+                retention=retention,
+                compression="zip",
+                backtrace=True,
+                diagnose=True,
+            )
 
-        logger.info(f"Logging to file: {log_file}")
+            logger.info(f"Logging to file: {log_file}")
+        except (PermissionError, OSError) as e:
+            logger.warning(f"Cannot write to log file {log_file}: {e}")
+            logger.info("Continuing with console logging only (Docker best practice)")
 
 
 def get_logger(name: str):
@@ -82,5 +86,4 @@ def get_logger(name: str):
     return logger.bind(name=name)
 
 
-# Default setup
-setup_logger(level="INFO")
+# No default setup — caller must invoke setup_logger() explicitly

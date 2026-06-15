@@ -4,7 +4,7 @@
 # ===========================
 
 # Core Framework
-fastapi>=0.115.2  # Required by gradio 5.44.1 (chatterbox dependency)
+fastapi>=0.115.2
 uvicorn[standard]>=0.30.0
 websockets>=12.0
 pydantic>=2.0.0
@@ -14,32 +14,66 @@ gunicorn==22.0.0
 
 # Machine Learning & Deep Learning
 torch>=2.0.0
-transformers>=4.36.0
+torchaudio
+transformers>=4.51.0
 accelerate>=0.25.0
-bitsandbytes>=0.41.0  # Required for 8-bit quantization
+bitsandbytes>=0.41.0  # 8-bit quantization for legacy transformers STT
 
+# ===========================
+# STT Backends
+# ===========================
+# faster-whisper: 2-4x speedup vs transformers, word timestamps, built-in VAD
+faster-whisper>=1.0.0
+
+# ===========================
 # Audio Processing
+# ===========================
 sounddevice>=0.4.6
 soundfile>=0.12.1
 librosa>=0.10.1
 scipy>=1.11.4
-numpy>=1.26.0,<2.0.0  # 1.26+ required for Python 3.12
+numpy>=1.26.0,<2.0.0
 webrtcvad>=2.0.10
 
+# ===========================
 # Language Detection
+# ===========================
+# lingua: better accuracy on short texts, preferred
+lingua-language-detector>=2.0.0
+# langdetect: fallback
 langdetect>=1.0.9
 
+# ===========================
 # TTS Providers
+# ===========================
+# Kokoro (82M, 8 languages, ultra-fast)
 kokoro>=0.9.4
-chatterbox-tts>=0.1.6
-# f5-tts>=1.1.15  # Installed separately in Dockerfile with --no-deps to avoid gradio conflict
+# Japanese support for Kokoro
 fugashi
 pyopenjtalk
 
+# Chatterbox (ResembleAI, MIT, 24 languages, voice cloning)
+chatterbox-tts>=0.1.6
+
+# F5-TTS (zero-shot cloning) - installed separately with --no-deps in Dockerfile
+# f5-tts>=1.1.15
+
+# Qwen3-TTS (Alibaba, Apache 2.0, custom voice / VoiceDesign / cloning, 10 langs)
+# qwen-tts  # pip install -U qwen-tts
+
+# Dia 1.6B - multi-speaker dialogue & nonverbal sounds (official package)
+# dia  # pip install dia
+
+# Orpheus 3B - expressive English TTS (official package + SNAC codec decoder)
+# orpheus-tts  # pip install orpheus-tts
+# snac  # pip install snac - for Orpheus audio decoding
+
+# ===========================
 # Utilities
+# ===========================
 python-dotenv>=1.0.0
 loguru>=0.7.0
 requests>=2.31.0
 
-# Development
+# Development / Testing
 pytest>=7.4.0

@@ -128,12 +128,14 @@ class ChatterboxProvider(TTSProvider):
             logger.info(f"Device: {self.config.device}")
             if self.use_cuda:
                 precision = "FP16" if self.use_half_precision else "FP32"
-                logger.info(f"🚀 GPU acceleration enabled ({precision})")
-                # Enable CUDA optimizations
-                torch.backends.cudnn.benchmark = True
+                logger.info(f"GPU acceleration enabled ({precision})")
+                # Enable CUDA optimizations. cudnn.benchmark stays off: TTS input
+                # lengths vary per request, so autotuning re-benchmarks each new
+                # shape and hurts latency.
+                torch.backends.cudnn.benchmark = False
                 torch.backends.cuda.matmul.allow_tf32 = True
             else:
-                logger.info("💻 CPU mode (slower)")
+                logger.info("CPU mode (slower)")
 
             # Load English model
             logger.info("Loading English model...")
@@ -143,7 +145,7 @@ class ChatterboxProvider(TTSProvider):
             # FP16 optimization is handled internally by the model
             if self.use_half_precision:
                 logger.info(
-                    "ℹ️ FP16 optimization requested (handled internally by Chatterbox)"
+                    "FP16 optimization requested (handled internally by Chatterbox)"
                 )
 
             # Load multilingual model
@@ -154,20 +156,20 @@ class ChatterboxProvider(TTSProvider):
 
             if self.use_half_precision:
                 logger.info(
-                    "ℹ️ FP16 optimization requested (handled internally by Chatterbox)"
+                    "FP16 optimization requested (handled internally by Chatterbox)"
                 )
 
             # Get sample rate from model
             self.sample_rate_output = self.model.sr
 
             self.is_initialized = True
-            logger.info("✓ Chatterbox TTS loaded successfully")
+            logger.info("Chatterbox TTS loaded successfully")
             logger.info(f"Sample rate: {self.sample_rate_output} Hz")
             if self.use_cuda:
-                logger.info("⚡ Expected speedup: 2-3x faster than CPU")
+                logger.info("Expected speedup: 2-3x faster than CPU")
 
         except ImportError as e:
-            logger.error("✗ Error: chatterbox-tts package not found")
+            logger.error("Error: chatterbox-tts package not found")
             logger.error("Install with: pip install chatterbox-tts")
             logger.error(
                 "Or from source: git clone https://github.com/resemble-ai/chatterbox.git && cd chatterbox && pip install -e ."
@@ -176,7 +178,7 @@ class ChatterboxProvider(TTSProvider):
                 "chatterbox-tts package required. Install: pip install chatterbox-tts"
             )
         except Exception as e:
-            logger.error(f"✗ Error initializing: {e}", exc_info=True)
+            logger.error(f"Error initializing: {e}", exc_info=True)
             raise
 
     async def synthesize(
@@ -195,7 +197,7 @@ class ChatterboxProvider(TTSProvider):
 
         # Ensure we have at least some audio
         if not audio_chunks:
-            logger.warning(f"⚠️ No audio chunks generated for text: '{text[:100]}...'")
+            logger.warning(f"No audio chunks generated for text: '{text[:100]}...'")
             logger.warning("This may be due to token repetition or early EOS forcing")
             # Return silence as fallback to avoid errors using shared utility
             silence = AudioProcessor.generate_silence(0.5, self.config.sample_rate)
@@ -249,14 +251,14 @@ class ChatterboxProvider(TTSProvider):
                 if not audio_prompt:
                     audio_prompt = get_audio_prompt_path(language)
                     if audio_prompt:
-                        print(
-                            f"[Chatterbox] Using official audio prompt for '{language}'"
+                        logger.debug(
+                            f"Using official audio prompt for '{language}'"
                         )
 
                 if audio_prompt:
                     generation_params["audio_prompt_path"] = audio_prompt
                 else:
-                    print(f"[Chatterbox] No audio prompt - using default voice")
+                    logger.debug("No audio prompt - using default voice")
 
                 # Use inference mode for faster generation (disables gradient computation)
                 with torch.inference_mode():
@@ -270,8 +272,8 @@ class ChatterboxProvider(TTSProvider):
 
                         # Log if Indonesian is using Malay voice
                         if language == "id":
-                            print(
-                                f"[Chatterbox] Using Malay (ms) voice for Indonesian text"
+                            logger.debug(
+                                "Using Malay (ms) voice for Indonesian text"
                             )
 
                         wav = self.multilingual_model.generate(
@@ -284,16 +286,12 @@ class ChatterboxProvider(TTSProvider):
                 else:
                     audio_np = wav
 
-                # Normalize to float32 [-1, 1]
-                if audio_np.dtype != np.float32:
-                    audio_np = audio_np.astype(np.float32)
+                # Normalize to float32 [-1, 1] using shared utility
+                audio_np = AudioProcessor.normalize_to_float32(audio_np)
 
-                if np.abs(audio_np).max() > 1.0:
-                    audio_np = audio_np / np.abs(audio_np).max()
-
-                # Resample if necessary
+                # Resample if necessary using shared utility
                 if self.config.sample_rate != self.sample_rate_output:
-                    audio_np = self._resample(
+                    audio_np = AudioProcessor.resample_audio(
                         audio_np, self.sample_rate_output, self.config.sample_rate
                     )
 
@@ -301,17 +299,15 @@ class ChatterboxProvider(TTSProvider):
                 if len(audio_np) > 0:
                     yield audio_np
                 else:
-                    print(
-                        f"[Chatterbox] Warning: Empty audio generated for sentence: {sentence[:50]}..."
+                    logger.warning(
+                        f"Empty audio generated for sentence: {sentence[:50]}..."
                     )
 
             except Exception as e:
-                print(
-                    f"[Chatterbox] Error synthesizing sentence '{sentence[:50]}...': {e}"
+                logger.error(
+                    f"Error synthesizing sentence '{sentence[:50]}...': {e}",
+                    exc_info=True,
                 )
-                import traceback
-
-                traceback.print_exc()
                 continue
 
     def list_voices(self, language: Optional[str] = None) -> List[Voice]:
@@ -374,74 +370,3 @@ class ChatterboxProvider(TTSProvider):
             "tr",
             "zh",
         ]
-
-    def _preprocess_text(self, text: str) -> str:
-        """Clean and normalize text for better TTS"""
-        # Remove extra whitespace
-        text = " ".join(text.split())
-
-        # Normalize quotes
-        text = text.replace('"', '"').replace('"', '"')
-        text = text.replace(""", "'").replace(""", "'")
-
-        # Remove markdown formatting
-        text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)  # Bold
-        text = re.sub(r"\*(.+?)\*", r"\1", text)  # Italic
-        text = re.sub(r"`(.+?)`", r"\1", text)  # Code
-        text = re.sub(r"\[(.+?)\]\(.+?\)", r"\1", text)  # Links
-
-        # Remove URLs
-        text = re.sub(r"http[s]?://\S+", "", text)
-
-        # Fix common abbreviations to prevent awkward splits
-        text = text.replace("e.g.", "for example")
-        text = text.replace("i.e.", "that is")
-        text = text.replace("etc.", "etcetera")
-        text = text.replace("Dr.", "Doctor")
-        text = text.replace("Mr.", "Mister")
-        text = text.replace("Mrs.", "Misses")
-        text = text.replace("Ms.", "Miss")
-
-        return text.strip()
-
-    def _split_sentences(self, text: str) -> List[str]:
-        """Split text into sentences with improved handling"""
-        # Preprocess text first
-        text = self._preprocess_text(text)
-
-        # Split on sentence boundaries
-        # Use regex to handle periods followed by space and capital letter
-        sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z])", text)
-
-        # Further split very long sentences (> 150 chars) at commas or semicolons
-        final_sentences = []
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if not sentence:
-                continue
-
-            # If sentence is too long, split at natural breaks
-            if len(sentence) > 150:
-                # Split at commas, semicolons, or conjunctions
-                parts = re.split(r"(?<=,)\s+|(?<=;)\s+|\s+(?:and|but|or)\s+", sentence)
-                for part in parts:
-                    part = part.strip()
-                    if part and len(part) > 10:  # Avoid tiny fragments
-                        final_sentences.append(part)
-            else:
-                final_sentences.append(sentence)
-
-        return final_sentences if final_sentences else [text]
-
-    def _resample(self, audio: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
-        """Resample audio to target sample rate"""
-        if orig_sr == target_sr:
-            return audio
-
-        try:
-            import librosa
-
-            return librosa.resample(audio, orig_sr=orig_sr, target_sr=target_sr)
-        except ImportError:
-            print("[Chatterbox] Warning: librosa not installed, skipping resampling")
-            return audio

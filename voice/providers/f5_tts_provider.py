@@ -10,6 +10,17 @@ import torch
 import numpy as np
 from typing import Generator, List, Optional
 from .base import TTSProvider, TTSConfig, Voice
+from voice.utils.audio import AudioProcessor
+from voice.utils.text import TextProcessor
+
+try:
+    from voice.utils.logger import get_logger
+
+    logger = get_logger(__name__)
+except ImportError:
+    import logging
+
+    logger = logging.getLogger(__name__)
 
 
 # F5-TTS voices (configurable through reference audio)
@@ -70,8 +81,8 @@ class F5TTSProvider(TTSProvider):
         if self.is_initialized:
             return
 
-        print(f"[F5-TTS] Initializing model...")
-        print(f"[F5-TTS] Device: {self.config.device}")
+        logger.info("Initializing F5-TTS model...")
+        logger.info(f"Device: {self.config.device}")
 
         try:
             # Try to import F5-TTS
@@ -81,22 +92,14 @@ class F5TTSProvider(TTSProvider):
                 from f5_tts.api import F5TTS
                 self.f5_tts_available = True
             except ImportError:
-                print("[F5-TTS] F5-TTS package not found. Trying alternative import...")
-                # Alternative: if installed from git
-                try:
-                    import sys
-                    sys.path.append('./F5-TTS')  # Adjust path as needed
-                    from f5_tts.api import F5TTS
-                    self.f5_tts_available = True
-                except ImportError:
-                    print("[F5-TTS] ✗ F5-TTS not installed")
-                    print("[F5-TTS] Install with: pip install f5-tts")
-                    print("[F5-TTS] Or: git clone https://github.com/SWivid/F5-TTS && cd F5-TTS && pip install -e .")
-                    raise ImportError("F5-TTS not installed")
+                logger.error("F5-TTS not installed")
+                logger.error("Install with: pip install f5-tts")
+                logger.error("Or: git clone https://github.com/SWivid/F5-TTS && cd F5-TTS && pip install -e .")
+                raise ImportError("F5-TTS not installed")
 
             # Initialize F5-TTS model
             # model parameter options: 'F5TTS_v1_Base' (default) or 'F5TTS_v1_Large'
-            print(f"[F5-TTS] Using model variant: {self.model_variant}")
+            logger.info(f"Using model variant: {self.model_variant}")
             self.model = F5TTS(
                 model=self.model_variant,
                 device=self.config.device,
@@ -104,7 +107,7 @@ class F5TTSProvider(TTSProvider):
 
             # Load model weights
             # Note: F5-TTS will download weights automatically on first run
-            print("[F5-TTS] Loading model weights (this may take a while on first run)...")
+            logger.info("Loading model weights (this may take a while on first run)...")
 
             # Set up default reference audio paths
             import os
@@ -132,30 +135,30 @@ class F5TTSProvider(TTSProvider):
 
                 if os.path.exists(en_ref):
                     self.default_references['en']['ref_file'] = en_ref
-                    print(f"[F5-TTS] ✓ Found English reference: {en_ref}")
+                    logger.info(f"Found English reference: {en_ref}")
                 else:
-                    print(f"[F5-TTS] ✗ English reference not found at: {en_ref}")
+                    logger.warning(f"English reference not found at: {en_ref}")
 
                 if os.path.exists(zh_ref):
                     self.default_references['zh']['ref_file'] = zh_ref
-                    print(f"[F5-TTS] ✓ Found Chinese reference: {zh_ref}")
+                    logger.info(f"Found Chinese reference: {zh_ref}")
                 else:
-                    print(f"[F5-TTS] ✗ Chinese reference not found at: {zh_ref}")
+                    logger.warning(f"Chinese reference not found at: {zh_ref}")
 
                 # Verify at least one reference was found
                 if not self.default_references['en']['ref_file'] and not self.default_references['zh']['ref_file']:
-                    print(f"[F5-TTS] ⚠️  Warning: No default reference audio found")
-                    print(f"[F5-TTS] Voice cloning will require custom reference audio")
+                    logger.warning("No default reference audio found")
+                    logger.warning("Voice cloning will require custom reference audio")
 
             except Exception as ref_error:
-                print(f"[F5-TTS] ⚠️  Warning: Could not locate reference audio files: {ref_error}")
-                print(f"[F5-TTS] Voice cloning will require custom reference audio")
+                logger.warning(f"Could not locate reference audio files: {ref_error}")
+                logger.warning("Voice cloning will require custom reference audio")
 
             self.is_initialized = True
-            print(f"[F5-TTS] ✓ Model loaded successfully")
+            logger.info("F5-TTS model loaded successfully")
 
         except Exception as e:
-            print(f"[F5-TTS] ✗ Error loading model: {e}")
+            logger.error(f"Error loading model: {e}", exc_info=True)
             raise
 
     async def synthesize(
@@ -164,7 +167,7 @@ class F5TTSProvider(TTSProvider):
         voice_id: str,
         language: str = "en",
         **kwargs
-    ) -> Generator[np.ndarray, None, None]:
+    ) -> List[np.ndarray]:
         """
         Synthesize speech using F5-TTS
 
@@ -180,8 +183,8 @@ class F5TTSProvider(TTSProvider):
         ref_text = kwargs.get('ref_text', None)
         speed = kwargs.get('speed', 1.0)
 
-        # Split into chunks for better streaming
-        chunks = self._split_text_chunks(text, max_length=200)
+        # Split into chunks for better streaming using shared utility
+        chunks = TextProcessor.split_into_chunks(text, max_length=200)
 
         audio_chunks = []
         for chunk in chunks:
@@ -204,11 +207,11 @@ class F5TTSProvider(TTSProvider):
                     ref_text = default_ref['ref_text']
 
                     if not ref_audio:
-                        print(f"[F5-TTS] Error: No reference audio available for {lang_key}")
-                        print(f"[F5-TTS] Please provide ref_audio and ref_text parameters")
+                        logger.error(f"No reference audio available for {lang_key}")
+                        logger.error("Please provide ref_audio and ref_text parameters")
                         continue
 
-                    print(f"[F5-TTS] Using default {lang_key} reference")
+                    logger.debug(f"Using default {lang_key} reference")
 
                 # Zero-shot voice cloning with correct parameter names
                 audio, sr = self.model.infer(
@@ -222,24 +225,32 @@ class F5TTSProvider(TTSProvider):
                 if isinstance(audio, torch.Tensor):
                     audio = audio.cpu().numpy()
 
-                # Normalize to float32 [-1, 1]
-                if audio.dtype != np.float32:
-                    audio = audio.astype(np.float32)
+                # Normalize to float32 [-1, 1] using shared utility
+                audio = AudioProcessor.normalize_to_float32(audio)
 
-                if np.abs(audio).max() > 1.0:
-                    audio = audio / np.abs(audio).max()
-
-                # Resample if necessary
+                # Resample if necessary using shared utility
                 if sr != self.config.sample_rate:
-                    audio = self._resample(audio, sr, self.config.sample_rate)
+                    audio = AudioProcessor.resample_audio(audio, sr, self.config.sample_rate)
 
                 audio_chunks.append(audio)
 
             except Exception as e:
-                print(f"[F5-TTS] Error synthesizing chunk: {e}")
+                logger.error(f"Error synthesizing chunk: {e}", exc_info=True)
                 continue
 
         return audio_chunks
+
+    async def synthesize_streaming(
+        self,
+        text: str,
+        voice_id: str,
+        language: str = "en",
+        **kwargs
+    ):
+        """Synthesize speech using F5-TTS with streaming (yields chunks as generated)"""
+        audio_chunks = await self.synthesize(text, voice_id, language, **kwargs)
+        for chunk in audio_chunks:
+            yield chunk
 
     def list_voices(self, language: Optional[str] = None) -> List[Voice]:
         """List available F5-TTS voices"""
@@ -284,47 +295,6 @@ class F5TTSProvider(TTSProvider):
     @property
     def supported_languages(self) -> List[str]:
         return ['en', 'zh', 'zh-cn', 'zh-tw', 'ja', 'es', 'fr', 'de', 'ko']
-
-    def _split_text_chunks(self, text: str, max_length: int = 200) -> List[str]:
-        """
-        Split text into chunks of reasonable length
-        F5-TTS works best with chunks of 100-200 characters
-        """
-        # First split by sentences
-        sentences = []
-        for delimiter in ['. ', '! ', '? ', '\n']:
-            text = text.replace(delimiter, f'{delimiter}|')
-
-        sentence_list = [s.strip() for s in text.split('|') if s.strip()]
-
-        # Then combine sentences into chunks
-        chunks = []
-        current_chunk = ""
-
-        for sentence in sentence_list:
-            if len(current_chunk) + len(sentence) <= max_length:
-                current_chunk += (" " if current_chunk else "") + sentence
-            else:
-                if current_chunk:
-                    chunks.append(current_chunk)
-                current_chunk = sentence
-
-        if current_chunk:
-            chunks.append(current_chunk)
-
-        return chunks if chunks else [text]
-
-    def _resample(self, audio: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
-        """Resample audio to target sample rate"""
-        if orig_sr == target_sr:
-            return audio
-
-        try:
-            import librosa
-            return librosa.resample(audio, orig_sr=orig_sr, target_sr=target_sr)
-        except ImportError:
-            print("[F5-TTS] Warning: librosa not installed, skipping resampling")
-            return audio
 
     def supports_voice_cloning(self) -> bool:
         """F5-TTS supports zero-shot voice cloning"""
