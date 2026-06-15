@@ -5,8 +5,19 @@ Using hexgrad/Kokoro-82M model with kokoro package
 
 import torch
 import numpy as np
-from typing import Generator, List, Optional, Dict
+from typing import Generator, List, Optional, Dict, Any
 from .base import TTSProvider, TTSConfig, Voice
+from voice.utils.audio import AudioProcessor
+from voice.utils.text import TextProcessor
+
+try:
+    from voice.utils.logger import get_logger
+
+    logger = get_logger(__name__)
+except ImportError:
+    import logging
+
+    logger = logging.getLogger(__name__)
 
 
 # Voice mappings for Kokoro
@@ -108,7 +119,7 @@ class KokoroProvider(TTSProvider):
 
     def __init__(self, config: TTSConfig):
         super().__init__(config)
-        self.pipelines: Dict[str, any] = {}  # Language-specific pipelines
+        self.pipelines: Dict[str, Any] = {}  # Language-specific pipelines
         self.model_id = 'hexgrad/Kokoro-82M'
 
     async def initialize(self):
@@ -116,8 +127,8 @@ class KokoroProvider(TTSProvider):
         if self.is_initialized:
             return
 
-        print(f"[Kokoro] Initializing Kokoro TTS...")
-        print(f"[Kokoro] Device: {self.config.device}")
+        logger.info("Initializing Kokoro TTS...")
+        logger.info(f"Device: {self.config.device}")
 
         try:
             # Import Kokoro's KPipeline
@@ -127,16 +138,16 @@ class KokoroProvider(TTSProvider):
             self.pipelines['b'] = KPipeline(lang_code='b', device=self.config.device)
 
             self.is_initialized = True
-            print(f"[Kokoro] ✓ Kokoro TTS loaded successfully")
-            print(f"[Kokoro] Pipelines will be loaded on-demand for other languages")
+            logger.info("Kokoro TTS loaded successfully")
+            logger.info("Pipelines will be loaded on-demand for other languages")
 
         except ImportError as e:
-            print(f"[Kokoro] ✗ Error: kokoro package not found")
-            print(f"[Kokoro] Install with: pip install kokoro-onnx")
-            print(f"[Kokoro] Or from source: https://huggingface.co/hexgrad/Kokoro-82M")
+            logger.error("Error: kokoro package not found")
+            logger.error("Install with: pip install kokoro-onnx")
+            logger.error("Or from source: https://huggingface.co/hexgrad/Kokoro-82M")
             raise ImportError("kokoro package required. Install: pip install kokoro-onnx")
         except Exception as e:
-            print(f"[Kokoro] ✗ Error initializing: {e}")
+            logger.error(f"Error initializing: {e}", exc_info=True)
             raise
 
     async def synthesize(
@@ -145,7 +156,7 @@ class KokoroProvider(TTSProvider):
         voice_id: str,
         language: str = "en",
         **kwargs
-    ) -> Generator[np.ndarray, None, None]:
+    ) -> List[np.ndarray]:
         """Synthesize speech using Kokoro"""
         if not self.is_initialized:
             await self.initialize()
@@ -157,14 +168,14 @@ class KokoroProvider(TTSProvider):
         pipeline = self._get_pipeline(lang_code)
 
         if pipeline is None:
-            print(f"[Kokoro] No pipeline available for language: {language}")
+            logger.error(f"No pipeline available for language: {language}")
             return []
 
-        # Split text into sentences for better quality
-        sentences = self._split_sentences(text)
+        # Split text into sentences for better quality using shared utility
+        sentences = TextProcessor.split_sentences(text)
 
         audio_chunks = []
-        speed = kwargs.get('speed', 1.2)
+        speed = kwargs.get('speed', 1.0)
 
         for sentence in sentences:
             if not sentence.strip():
@@ -184,20 +195,69 @@ class KokoroProvider(TTSProvider):
                     else:
                         audio_np = audio
 
-                    # Normalize to float32 [-1, 1]
-                    if audio_np.dtype != np.float32:
-                        audio_np = audio_np.astype(np.float32)
-
-                    if np.abs(audio_np).max() > 1.0:
-                        audio_np = audio_np / np.abs(audio_np).max()
+                    # Normalize to float32 [-1, 1] using shared utility
+                    audio_np = AudioProcessor.normalize_to_float32(audio_np)
 
                     audio_chunks.append(audio_np)
 
             except Exception as e:
-                print(f"[Kokoro] Error synthesizing sentence: {e}")
+                logger.error(f"Error synthesizing sentence: {e}", exc_info=True)
                 continue
 
         return audio_chunks
+
+    async def synthesize_streaming(
+        self,
+        text: str,
+        voice_id: str,
+        language: str = "en",
+        **kwargs
+    ):
+        """Synthesize speech using Kokoro with streaming (yields chunks as generated)"""
+        if not self.is_initialized:
+            await self.initialize()
+
+        # Get language code
+        lang_code = self._get_lang_code(language)
+
+        # Get or create pipeline for this language
+        pipeline = self._get_pipeline(lang_code)
+
+        if pipeline is None:
+            logger.error(f"No pipeline available for language: {language}")
+            return
+
+        # Split text into sentences for better quality using shared utility
+        sentences = TextProcessor.split_sentences(text)
+
+        speed = kwargs.get('speed', 1.0)
+
+        for sentence in sentences:
+            if not sentence.strip():
+                continue
+
+            try:
+                # Generate with Kokoro pipeline
+                # pipeline() returns generator of (phonemes, tokens, audio)
+                for _, (_, _, audio) in enumerate(pipeline(
+                    sentence,
+                    voice=voice_id,
+                    speed=speed
+                )):
+                    # Convert to numpy if needed
+                    if isinstance(audio, torch.Tensor):
+                        audio_np = audio.cpu().numpy()
+                    else:
+                        audio_np = audio
+
+                    # Normalize to float32 [-1, 1] using shared utility
+                    audio_np = AudioProcessor.normalize_to_float32(audio_np)
+
+                    yield audio_np
+
+            except Exception as e:
+                logger.error(f"Error synthesizing sentence: {e}", exc_info=True)
+                continue
 
     def list_voices(self, language: Optional[str] = None) -> List[Voice]:
         """List available Kokoro voices"""
@@ -235,20 +295,6 @@ class KokoroProvider(TTSProvider):
     def supported_languages(self) -> List[str]:
         return ['en', 'ja', 'zh', 'zh-cn', 'zh-tw', 'es', 'fr', 'hi', 'it', 'pt', 'pt-br']
 
-    def _split_sentences(self, text: str) -> List[str]:
-        """Split text into sentences"""
-        # Simple sentence splitting
-        sentences = []
-        for delimiter in ['.', '!', '?']:
-            text = text.replace(delimiter, f'{delimiter}|')
-
-        for sentence in text.split('|'):
-            sentence = sentence.strip()
-            if sentence:
-                sentences.append(sentence)
-
-        return sentences if sentences else [text]
-
     def _get_pipeline(self, lang_code: str):
         """Get or create pipeline for language"""
         if lang_code not in self.pipelines:
@@ -260,9 +306,9 @@ class KokoroProvider(TTSProvider):
                     lang_code=lang_code,
                     device=self.config.device
                 )
-                print(f"[Kokoro] ✓ Loaded pipeline for: {lang_code}")
+                logger.info(f"Loaded pipeline for: {lang_code}")
             except Exception as e:
-                print(f"[Kokoro] Failed to load pipeline for {lang_code}: {e}")
+                logger.error(f"Failed to load pipeline for {lang_code}: {e}", exc_info=True)
                 # Fallback to British English
                 return self.pipelines.get('b')
 

@@ -8,6 +8,9 @@
 #   CPU only:       docker-compose --profile cpu up voice-backend-cpu
 #   Development:    docker-compose --profile dev up voice-backend-dev
 #
+# Model cache note:
+#   Models are stored in ./models/ (bind mount, host-owned).
+#   They persist across container rebuilds and are readable/writable by appuser.
 # ============================================================================
 
 services:
@@ -21,10 +24,13 @@ services:
       args:
         DEVICE_TYPE: gpu
         PYTHON_VERSION: "3.11"
-        CUDA_VERSION: "13.1.0"
+        CUDA_VERSION: "12.8.1"
     image: ragcoon/voice-backend:gpu-latest
     container_name: voice-backend-gpu
     restart: unless-stopped
+
+    # Run as host user to avoid permission issues with bind mounts
+    user: "${UID:-1000}:${GID:-1000}"
 
     # GPU Support - NVIDIA Container Toolkit required
     deploy:
@@ -32,63 +38,47 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1  # Use 1 GPU (change to specific number if needed)
+              count: 1
               capabilities: [gpu]
         limits:
           cpus: '8'
           memory: 16G
 
-    # Resource limits (fallback if deploy not supported)
     mem_limit: 16g
     memswap_limit: 16g
-    shm_size: '2gb'  # Critical for PyTorch DataLoader
+    shm_size: '2gb'
 
-    # Environment Configuration
     env_file:
       - .env
     environment:
-      # Server Configuration
       - HOST=0.0.0.0
       - PORT=8002
       - LOG_LEVEL=INFO
-
-      # Device Configuration
       - TTS_DEVICE=cuda
       - STT_DEVICE=cuda
       - STT_USE_QUANTIZATION=true
       - NVIDIA_VISIBLE_DEVICES=all
       - CUDA_VISIBLE_DEVICES=0
-
-      # Model Cache Paths
+      # Model cache — bind mount so appuser can write on first run
       - TRANSFORMERS_CACHE=/app/models/transformers
       - HF_HOME=/app/models/huggingface
       - TORCH_HOME=/app/models/torch
-
-      # Python Configuration
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
 
-    # Port Mapping
     ports:
       - "8002:8002"
 
-    # Volume Mounts
     volumes:
-      # Application data
       - ./data:/app/data:rw
       - ./logs:/app/logs:rw
-
-      # Model cache (persistent)
-      - model-cache:/app/models:rw
-
-      # Audio prompts (read-only)
+      # Bind mount (not named volume) — host user owns it, appuser can write
+      - ./models:/app/models:rw
       - ./voice/audio_prompts:/app/voice/audio_prompts:ro
 
-    # Network
     networks:
       - voice-network
 
-    # Health Check
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8002/api/voice/health || exit 1"]
       interval: 30s
@@ -96,7 +86,6 @@ services:
       retries: 3
       start_period: 60s
 
-    # Logging Configuration
     logging:
       driver: "json-file"
       options:
@@ -119,7 +108,8 @@ services:
     profiles:
       - cpu
 
-    # Resource limits for CPU
+    user: "${UID:-1000}:${GID:-1000}"
+
     deploy:
       resources:
         limits:
@@ -138,6 +128,9 @@ services:
       - LOG_LEVEL=INFO
       - TTS_DEVICE=cpu
       - STT_DEVICE=cpu
+      - TRANSFORMERS_CACHE=/app/models/transformers
+      - HF_HOME=/app/models/huggingface
+      - TORCH_HOME=/app/models/torch
       - OMP_NUM_THREADS=4
       - MKL_NUM_THREADS=4
       - PYTHONUNBUFFERED=1
@@ -148,7 +141,7 @@ services:
     volumes:
       - ./data:/app/data:rw
       - ./logs:/app/logs:rw
-      - model-cache:/app/models:rw
+      - ./models:/app/models:rw
       - ./voice/audio_prompts:/app/voice/audio_prompts:ro
 
     networks:
@@ -183,6 +176,8 @@ services:
     profiles:
       - dev
 
+    user: "${UID:-1000}:${GID:-1000}"
+
     deploy:
       resources:
         reservations:
@@ -201,24 +196,26 @@ services:
       - LOG_LEVEL=DEBUG
       - TTS_DEVICE=cuda
       - STT_DEVICE=cuda
+      - TRANSFORMERS_CACHE=/app/models/transformers
+      - HF_HOME=/app/models/huggingface
+      - TORCH_HOME=/app/models/torch
       - PYTHONUNBUFFERED=1
 
     ports:
       - "8002:8002"
 
-    # Mount source code for hot reload
     volumes:
       - ./voice:/app/voice:rw
       - ./config:/app/config:rw
       - ./tests:/app/tests:rw
       - ./data:/app/data:rw
       - ./logs:/app/logs:rw
-      - model-cache:/app/models:rw
+      # Bind mount — models persist on host, writable by appuser (UID from .env)
+      - ./models:/app/models:rw
 
     networks:
       - voice-network
 
-    # Override command for development with auto-reload
     command:
       - sh
       - -c
@@ -242,8 +239,6 @@ networks:
 
 # ==========================================================================
 # Volumes
+# NOTE: model-cache named volume removed — replaced by ./models bind mount
+#       to avoid root-ownership permission issues with appuser.
 # ==========================================================================
-volumes:
-  model-cache:
-    name: voice-model-cache
-    driver: local
